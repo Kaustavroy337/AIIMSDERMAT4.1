@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Doctor Token Display</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@700&family=Roboto:wght@700&display=swap" rel="stylesheet">
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      background: #69AEE8;
+      text-align: center;
+      flex-direction: column;
+      color: #1E1E1E;
+    }
+    .room {
+      font-size: 5em;
+      margin-top: 0.5em;
+      font-family: 'Roboto', sans-serif;
+      font-weight: 700;
+    }
+    .token-label {
+      font-size: 2.5em;
+      margin-top: 0.1em;
+      line-height: 0.5;
+    }
+    .token-number {
+      margin-top: 0;
+      font-size: 12em;
+      color: #1E1E1E;
+      font-family: 'Inter', sans-serif;
+      font-weight: 700;
+    }
+
+    .flicker {
+      animation: flickerAnimation 3s ease-in-out;
+    }
+
+    @keyframes flickerAnimation {
+      0%, 20%, 40%, 60%, 80%, 100% { opacity: 1; }
+      10%, 30%, 50%, 70%, 90% { opacity: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div id="display">
+    <div class="room" id="roomNo"></div>
+    <div class="token-label" id="tokenLabel">टोकन</div>
+    <div class="token-number" id="tokenNumber"></div>
+  </div>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', async () => {
+      const { createClient } = supabase;
+      const supabaseUrl = 'https://aanlephegmswewskrkxq.supabase.co';
+      const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFhbmxlcGhlZ21zd2V3c2tya3hxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjIzNTUwNzYsImV4cCI6MjA3NzkzMTA3Nn0.35tkpljQzZ6bwT9H5-BhCkyEIU3O-kPPLDDtscVFeAc';
+      
+      const supabaseClient = createClient(supabaseUrl, supabaseKey);
+
+      const DOCTORS = ['DR. NITIN LADE', 'DR. NAVYA PEDAPALLI', 'DR. ANANYA ARYA'];
+      let currentDoctorIndex = 0;
+      let availableDoctors = [];
+      let lastTokenNumbers = {};
+      let allTokens = {};
+      let toggleInterval = null;
+      let langToggleInterval = null; // new language toggle timer
+      let isHindi = true; // track current display language
+
+      const roomEl = document.getElementById('roomNo');
+      const tokenEl = document.getElementById('tokenNumber');
+      const tokenLabelEl = document.getElementById('tokenLabel');
+
+      // Convert English digits to Hindi digits
+      function toHindiDigits(number) {
+        const hindiDigits = ['०','१','२','३','४','५','६','७','८','९'];
+        return number.toString().split('').map(d => hindiDigits[+d] || d).join('');
+      }
+
+      // Fetch latest token for a doctor
+      async function fetchDoctorToken(doctorName) {
+        const { data, error } = await supabaseClient
+          .from('running_token_details')
+          .select('"DOCTOR NAME", "ROOM NO", "TOKEN NUMBER", "CREATED AT"')
+          .eq('DOCTOR NAME', doctorName)
+          .order('CREATED AT', { ascending: false })
+          .limit(1);
+
+        if (error) {
+          console.error('Error fetching data:', error);
+          return null;
+        }
+
+        return data.length ? data[0] : null;
+      }
+
+      // Fetch all doctors' data
+      async function fetchAllDoctors() {
+        const results = await Promise.all(DOCTORS.map(fetchDoctorToken));
+        availableDoctors = DOCTORS.filter((_, i) => results[i] !== null);
+        return results.reduce((acc, val, i) => {
+          if (val) acc[DOCTORS[i]] = val;
+          return acc;
+        }, {});
+      }
+
+      // Render display (based on current language mode)
+      function renderDisplay(tokenData) {
+        if (!tokenData) {
+          roomEl.textContent = '';
+          tokenEl.textContent = '';
+          tokenLabelEl.textContent = '';
+          return;
+        }
+
+        const room = tokenData["ROOM NO"];
+        const token = tokenData["TOKEN NUMBER"];
+
+        if (isHindi) {
+          roomEl.textContent = `रूम : ${toHindiDigits(room)}`;
+          tokenLabelEl.textContent = 'टोकन';
+          tokenEl.textContent = toHindiDigits(token);
+        } else {
+          roomEl.textContent = `ROOM : ${room}`;
+          tokenLabelEl.textContent = 'TOKEN';
+          tokenEl.textContent = token;
+        }
+      }
+
+      // Update display for current doctor
+      async function updateDisplayForCurrentDoctor() {
+        allTokens = await fetchAllDoctors();
+
+        if (availableDoctors.length === 0) {
+          renderDisplay(null);
+          return;
+        }
+
+        const doctorName = availableDoctors[currentDoctorIndex % availableDoctors.length];
+        const tokenData = allTokens[doctorName];
+
+        if (!tokenData) {
+          renderDisplay(null);
+          return;
+        }
+
+        const newToken = tokenData["TOKEN NUMBER"];
+        if (lastTokenNumbers[doctorName] !== newToken) {
+          tokenEl.classList.remove('flicker');
+          void tokenEl.offsetWidth;
+          tokenEl.classList.add('flicker');
+        }
+
+        lastTokenNumbers[doctorName] = newToken;
+        renderDisplay(tokenData);
+      }
+
+      // Reset doctor toggle timer (10 seconds)
+      function resetInterval() {
+        if (toggleInterval) clearInterval(toggleInterval);
+        toggleInterval = setInterval(toggleDoctorAndUpdate, 10000);
+      }
+
+      // Reset bilingual toggle timer (5 seconds)
+      function resetLangInterval(tokenData) {
+        if (langToggleInterval) clearInterval(langToggleInterval);
+
+        // Always start with Hindi when new token or new doctor displayed
+        isHindi = true;
+        renderDisplay(tokenData);
+
+        langToggleInterval = setInterval(() => {
+          isHindi = !isHindi;
+          renderDisplay(tokenData);
+        }, 5000);
+      }
+
+      // Toggle doctor every 10 seconds
+      async function toggleDoctorAndUpdate() {
+        if (availableDoctors.length > 1) {
+          currentDoctorIndex = (currentDoctorIndex + 1) % availableDoctors.length;
+        }
+        const doctorName = availableDoctors[currentDoctorIndex % availableDoctors.length];
+        const tokenData = allTokens[doctorName];
+        await updateDisplayForCurrentDoctor();
+        resetLangInterval(tokenData);
+      }
+
+      // Detect new tokens via 2-second polling
+      async function pollForUpdates() {
+        const newTokens = await fetchAllDoctors();
+
+        for (const doc of DOCTORS) {
+          const tokenData = newTokens[doc];
+          const newToken = tokenData ? tokenData["TOKEN NUMBER"] : null;
+          const oldToken = lastTokenNumbers[doc];
+
+          if (tokenData && newToken !== oldToken) {
+            // New token found
+            renderDisplay(tokenData);
+            tokenEl.classList.remove('flicker');
+            void tokenEl.offsetWidth;
+            tokenEl.classList.add('flicker');
+
+            lastTokenNumbers[doc] = newToken;
+            currentDoctorIndex = DOCTORS.indexOf(doc);
+
+            resetInterval(); // restart 10s cycle
+            resetLangInterval(tokenData); // restart 5s bilingual toggle
+            return;
+          }
+        }
+      }
+
+      // Initial load
+      await updateDisplayForCurrentDoctor();
+
+      const firstDoctor = availableDoctors.length > 0
+        ? allTokens[availableDoctors[currentDoctorIndex]]
+        : null;
+      resetLangInterval(firstDoctor);
+      resetInterval();
+
+      // Start 2s polling loop
+      setInterval(pollForUpdates, 2000);
+    });
+  </script>
+</body>
+</html>
